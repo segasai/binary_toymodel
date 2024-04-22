@@ -14,6 +14,7 @@ def make_samp(Nstars,
               Npt,
               Nsamp,
               dt=5,
+              bin_frac=0.5,
               min_per=0.001,
               max_per=10,
               vel_disp=5,
@@ -26,13 +27,16 @@ def make_samp(Nstars,
     sini = np.sqrt(1 - cosi**2)
     amp0 = VREF / per**(1. / 3) * sini
     res = []
+    is_bin = (rng.uniform(0, 1, size=Nstars) < bin_frac).astype(int)
     for i in range(Nstars):
         ts = rng.uniform(0, dt, size=Npt)
-        v = (v0[i] + amp0[i] * np.sin(2 * np.pi / per[i] * ts - phase[i]) +
+        v = (v0[i] +
+             amp0[i] * is_bin[i] * np.sin(2 * np.pi / per[i] * ts - phase[i]) +
              rng.normal(size=Npt) * vel_err)
         ev = v * 0 + vel_err
         res.append([ts, v, ev])
-    return res
+    truep = np.array([v0, per, phase, sini, is_bin]).T
+    return res, truep
 
 
 class Prior:
@@ -54,37 +58,64 @@ class Prior:
         return x1
 
 
+class PriorNB:
+
+    def __init__(self, vel_sig):
+        self.MINV = -1000
+        self.vel_sig = vel_sig
+
+    def __call__(self, x):
+        V = scipy.special.ndtri(x[0]) * self.vel_sig
+        x1 = x * 0
+        x1[0] = V
+        return x1
+
+
 def like(p, data):
-    t, v, ev = data
-    v0, per, phase, sini = p
+    t, v, ev, bin_switch = data
+    if bin_switch:
+        v0, per, phase, sini = p
+    else:
+        v0 = p[0]
+        per, phase = 1, 0
+        sini = 0
     amp0 = VREF / per**(1. / 3) * sini
     model = amp0 * np.sin(2 * np.pi / per * t - phase) + v0
     logl = -0.5 * np.sum(((model - v) / ev)**2)
     return logl
 
 
-def posterior(t, v, ev, minp, maxp, seed=1):
-    pri = Prior(DISP_PRIOR, minp, maxp)
-    ndim = 4
+def posterior(t, v, ev, binary, minp=None, maxp=None, seed=1):
+    if binary:
+        pri = Prior(DISP_PRIOR, minp, maxp)
+        ndim = 4
+        periodic = [2]
+    else:
+        pri = PriorNB(DISP_PRIOR, )
+        ndim = 1
+        periodic = None
+    data = ((t, v, ev, binary), )
+
     rng = np.random.default_rng(seed)
-    nlive = 10000
+    nlive = 1000
     dns = dynesty.DynamicNestedSampler(like,
                                        pri,
                                        ndim,
                                        rstate=rng,
                                        nlive=nlive,
-                                       bound='single',
+                                       bound='multi',
                                        sample='rslice',
-                                       periodic=[2],
-                                       logl_args=((t, v, ev), ))
-    #dns.run_nested(n_effective=10000, print_progress=False)
+                                       periodic=periodic,
+                                       logl_args=data)
+    # dns.run_nested(n_effective=10000, print_progress=False)
     print_progress = False
     dns.run_nested(n_effective=10000,
                    print_progress=print_progress)  #, maxbatch=1)
-    #for i in range(10):
+    # for i in range(10):
     #    dns.add_batch(mode='full')
     res = dns.results.samples_equal()
-    return res
+    logz = dns.results.logz[-1]
+    return res, logz
 
 
 class si:
@@ -115,27 +146,34 @@ def hierarch(nsamp=10000, seed=12):
 
 
 if __name__ == '__main__':
-    Nstars = 1000
-    Npt = 5
+    Nstars = 200
+    Npt = 1
     vel_disp = 5
     Nsamp = 1000
-    min_per = 0.001
+    min_per = 0.1
     max_per = 10
     vel_err = 0.5
-    S = make_samp(Nstars,
-                  Npt,
-                  Nsamp,
-                  dt=5,
-                  min_per=min_per,
-                  max_per=max_per,
-                  vel_disp=vel_disp,
-                  vel_err=vel_err)
+    bin_frac = 0.5
+    pref = 'tmp/nbin'
+    binary_model = False
+    S, truep = make_samp(Nstars,
+                         Npt,
+                         Nsamp,
+                         dt=5,
+                         bin_frac=bin_frac,
+                         min_per=min_per,
+                         max_per=max_per,
+                         vel_disp=vel_disp,
+                         vel_err=vel_err)
     with mp.Pool(36) as poo:
         R = []
         for i in range(Nstars):
-            curs = S[i]
-            args = (curs[0], curs[1], curs[2], min_per, max_per, i)
-            R.append((i, poo.apply_async(posterior, args), curs))
-        for curi, curr, curs in R:
-            curr = curr.get()
-            idlsave.save('tmp/xx_%05d.psav' % (curi), 'curr, curs', curr, curs)
+            cur_dat = S[i]
+            cur_truep = truep[i]
+            args = (cur_dat[0], cur_dat[1], cur_dat[2], binary_model, min_per,
+                    max_per, i)
+            R.append((i, poo.apply_async(posterior, args), cur_dat, cur_truep))
+        for cur_i, cur_r, cur_dat, cur_true in R:
+            cur_samp, cur_logz = cur_r.get()
+            idlsave.save(f'{pref}_{cur_i:05d}.psav', 'dat, samp, logz, truep',
+                         cur_dat, cur_samp, cur_logz, cur_true)
