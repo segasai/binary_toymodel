@@ -41,7 +41,7 @@ def dosamp():
         es.reset()
         R = es.run_mcmc(xs, nsteps)
     ptrue = [.5, .2, .6, 12, 10]
-    corner.corner(R.chain[:, 0:, :].reshape(-1, 5),
+    corner.corner(es.chain[:, 0:, :].reshape(-1, ndim),
                   truths=ptrue,
                   labels=['mlogp', 'slogp', 'bfrac', 'vel', 'disp'])
     plt.savefig('chain.png')
