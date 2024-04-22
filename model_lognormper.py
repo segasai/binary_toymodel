@@ -3,6 +3,7 @@ import dynesty
 import scipy.special
 import multiprocessing as mp
 import glob
+import sys
 from idlsave import idlsave  # importing sergey's idlsave
 
 # Rachel's Path things
@@ -23,6 +24,7 @@ def make_samp(Nstars,
               Npt,
               Nsamp,
               dt=5,
+              v0=0,
               bin_frac=0.5,
               min_per=0.001,
               max_per=10,
@@ -38,7 +40,7 @@ def make_samp(Nstars,
 
     # per = 10**rng.uniform(np.log10(min_per), np.log10(max_per), size=Nstars)
     phase = rng.uniform(0, 2 * np.pi, size=Nstars)
-    v0 = rng.normal(size=Nstars) * vel_disp
+    v0s = v0 + rng.normal(size=Nstars) * vel_disp
     cosi = rng.uniform(0, 1, size=Nstars)
     sini = np.sqrt(1 - cosi**2)
     amp0 = VREF / per**(1. / 3) * sini
@@ -46,12 +48,12 @@ def make_samp(Nstars,
     is_bin = (rng.uniform(0, 1, size=Nstars) < bin_frac).astype(int)
     for i in range(Nstars):
         ts = rng.uniform(0, dt, size=Npt)
-        v = (v0[i] +
+        v = (v0s[i] +
              amp0[i] * is_bin[i] * np.sin(2 * np.pi / per[i] * ts - phase[i]) +
              rng.normal(size=Npt) * vel_err)
         ev = v * 0 + vel_err
         res.append([ts, v, ev])
-    truep = np.array([v0, per, phase, sini, is_bin]).T
+    truep = np.array([v0s, per, phase, sini, is_bin]).T
     return res, truep
 
 
@@ -228,9 +230,12 @@ def hierarch_perbf_like(p,
 
 
 if __name__ == '__main__':
+    binary_model = bool(int(sys.argv[1]))
+
     Nstars = 2000
     Npt = 4
     vel_err = 0.5
+    v0 = 12
     Nsamp = 1000
 
     vel_disp = 10  # DISP_PRIOR
@@ -248,7 +253,6 @@ if __name__ == '__main__':
         pass
     print(path, mean_logper, std_logper, vel_disp, bin_frac)
 
-    binary_model = True
     # binary_model = False
 
     if binary_model:
@@ -261,6 +265,7 @@ if __name__ == '__main__':
                          Npt,
                          Nsamp,
                          dt=5,
+                         v0=v0,
                          bin_frac=bin_frac,
                          min_per=min_per,
                          max_per=max_per,
