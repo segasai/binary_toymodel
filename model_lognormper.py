@@ -167,7 +167,7 @@ def hierarch_perbf_like(p,
         persamp = []
         velsamp = []
         evid = []
-        for _ in glob.glob(prefix + 'bin*psav'):
+        for _ in sorted(glob.glob(prefix + 'bin*psav')):
             temp = idlsave.restore(_, 'samp, logz')
             persamp.append(temp[0][:, 1][:nsamp0])
             velsamp.append(temp[0][:, 0][:nsamp0])
@@ -189,7 +189,7 @@ def hierarch_perbf_like(p,
     if si.cache_logz_nb is None:
         evid = []
         velsamp = []
-        for _ in glob.glob(prefix_nb + 'nb*psav'):
+        for _ in sorted(glob.glob(prefix_nb + 'nb*psav')):
             temp = idlsave.restore(_, 'samp, logz')
             evid.append(temp[1])
             velsamp.append(temp[0][:, 0][:nsamp0])
