@@ -5,7 +5,7 @@ from idlsave import idlsave
 import multiprocessing as mp
 import glob
 
-VREF = 30
+VREF = 0
 
 DISP_PRIOR = 100  # width of gaussian prior on velocity
 
@@ -18,8 +18,9 @@ def make_samp(Nstars,
               min_per=0.001,
               max_per=10,
               vel_disp=5,
-              vel_err=0.5):
-    rng = np.random.default_rng(44)
+              vel_err=0.5,
+              seed=44):
+    rng = np.random.default_rng(seed)
     per = 10**rng.uniform(np.log10(min_per), np.log10(max_per), size=Nstars)
     phase = rng.uniform(0, 2 * np.pi, size=Nstars)
     v0 = rng.normal(size=Nstars) * vel_disp
@@ -146,16 +147,15 @@ def hierarch(nsamp=10000, seed=12):
 
 
 if __name__ == '__main__':
-    Nstars = 200
+    Nstars = 1000
     Npt = 1
-    vel_disp = 5
+    vel_disp = DISP_PRIOR
     Nsamp = 1000
     min_per = 0.1
-    max_per = 10
+    max_per = 10000
     vel_err = 0.5
     bin_frac = 0.5
-    pref = 'tmp/nbin'
-    binary_model = False
+    pref0 = 'tmp3/'
     S, truep = make_samp(Nstars,
                          Npt,
                          Nsamp,
@@ -164,16 +164,21 @@ if __name__ == '__main__':
                          min_per=min_per,
                          max_per=max_per,
                          vel_disp=vel_disp,
-                         vel_err=vel_err)
-    with mp.Pool(36) as poo:
-        R = []
-        for i in range(Nstars):
-            cur_dat = S[i]
-            cur_truep = truep[i]
-            args = (cur_dat[0], cur_dat[1], cur_dat[2], binary_model, min_per,
-                    max_per, i)
-            R.append((i, poo.apply_async(posterior, args), cur_dat, cur_truep))
-        for cur_i, cur_r, cur_dat, cur_true in R:
-            cur_samp, cur_logz = cur_r.get()
-            idlsave.save(f'{pref}_{cur_i:05d}.psav', 'dat, samp, logz, truep',
-                         cur_dat, cur_samp, cur_logz, cur_true)
+                         vel_err=vel_err,
+                         seed=44)
+    for binary_model in [False, True]:
+        pref = pref0 + {False: 'nbin', True: 'ybin'}[binary_model]
+        with mp.Pool(36) as poo:
+            R = []
+            for i in range(Nstars):
+                cur_dat = S[i]
+                cur_truep = truep[i]
+                args = (cur_dat[0], cur_dat[1], cur_dat[2], binary_model,
+                        min_per, max_per, i)
+                R.append((i, poo.apply_async(posterior,
+                                             args), cur_dat, cur_truep))
+            for cur_i, cur_r, cur_dat, cur_true in R:
+                cur_samp, cur_logz = cur_r.get()
+                idlsave.save(f'{pref}_{cur_i:05d}.psav',
+                             'dat, samp, logz, truep', cur_dat, cur_samp,
+                             cur_logz, cur_true)

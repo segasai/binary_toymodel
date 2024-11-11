@@ -15,7 +15,7 @@ VERA = os.getcwd() + '/'
 # os.sys.path.append(VERA + 'Research/')
 # from binary_bayes.utils import TruncatedLogNormal
 
-VREF = 30
+VREF = 0
 
 DISP_PRIOR = 100  # width of gaussian prior on velocity
 
@@ -155,10 +155,10 @@ def hierarch_perbf_like(p,
     Hierarchical likelihood
     """
     # meanper, binfrac = p
-    meanper, stdper, binfrac, meanvel, sigvel = p
+    mean_logper, std_logper, binfrac, meanvel, sigvel = p
 
     if binfrac >= 1 or binfrac <= 0 or np.abs(
-            meanper) > 5 or stdper < 0 or stdper > 5 or sigvel < 0:
+            mean_logper) > 5 or std_logper < 0 or std_logper > 5 or sigvel < 0:
         return -1e100 * mult
 
     # load both bin and nb samps and logz's
@@ -167,13 +167,13 @@ def hierarch_perbf_like(p,
         persamp = []
         velsamp = []
         evid = []
-        for _ in sorted(glob.glob(prefix + 'bin*psav')):
+        for _ in sorted(glob.glob(prefix + 'ybin*psav')):
             temp = idlsave.restore(_, 'samp, logz')
             persamp.append(temp[0][:, 1][:nsamp0])
             velsamp.append(temp[0][:, 0][:nsamp0])
             evid.append(temp[1])
         si.cache_per = np.array(persamp)  # store binary period samples
-        si.cache_vel = np.array(velsamp)  # store binary period samples
+        cache_vel = np.array(velsamp)  # store binary period samples
         si.cache_logz = np.array(evid)  # store binary evidence Z
 
         ARR = si.cache_per
@@ -182,8 +182,8 @@ def hierarch_perbf_like(p,
         ARR = ARR[np.arange(ARR.shape[0])[:, None] + permut * 0, permut]
         si.PER = si.cache_per[np.arange(ARR.shape[0])[:, None] + permut * 0,
                               permut]
-        si.VEL_bin = si.cache_vel[np.arange(ARR.shape[0])[:, None] +
-                                  permut * 0, permut]
+        si.VEL_bin = cache_vel[np.arange(ARR.shape[0])[:, None] + permut * 0,
+                               permut]
     PER = si.PER
     VEL_bin = si.VEL_bin
     if si.cache_logz_nb is None:
@@ -194,9 +194,9 @@ def hierarch_perbf_like(p,
             evid.append(temp[1])
             velsamp.append(temp[0][:, 0][:nsamp0])
         si.cache_logz_nb = np.array(evid)  # store non-binary evidence Z
-        si.cache_vel = np.array(velsamp)
-        si.VEL_nbin = si.cache_vel[np.arange(ARR.shape[0])[:, None] +
-                                   permut * 0, permut]
+        cache_vel = np.array(velsamp)
+        si.VEL_nbin = cache_vel[np.arange(ARR.shape[0])[:, None] + permut * 0,
+                                permut]
     VEL_nbin = si.VEL_nbin
     # likelihood part
 
@@ -204,7 +204,7 @@ def hierarch_perbf_like(p,
     pi0_per = scipy.stats.loguniform(min_per, max_per).logpdf(PER)
 
     # normalizationtruncated lognorm
-    NN = scipy.stats.norm(meanper, stdper)
+    NN = scipy.stats.norm(mean_logper, std_logper)
 
     NNrv = scipy.stats.norm(meanvel, sigvel)
     NNrv0 = scipy.stats.norm(0, DISP_PRIOR)
@@ -230,23 +230,23 @@ def hierarch_perbf_like(p,
 
 
 if __name__ == '__main__':
-    binary_model = bool(int(sys.argv[1]))
 
-    Nstars = 2000
-    Npt = 4
+    Nstars = 1000
+    Npt = 1
     vel_err = 0.5
-    v0 = 12
+    v0 = 0
     Nsamp = 1000
 
-    vel_disp = 10  # DISP_PRIOR
-    mean_logper = 0.5
-    std_logper = 0.2
+    vel_disp = DISP_PRIOR
+    mean_logper = 2.5
+    std_logper = 1
     min_per = 0.1
-    max_per = 10
-    bin_frac = 0.6
+    max_per = 1e9
+    bin_frac = 0.5
 
     seed = 123
-    path = VERA + 'test_data_%d_%d/' % (Npt, seed)
+    typ = 'test240930'
+    path = VERA + 'test_data_%s_%d_%d/' % (typ, Npt, seed)
     try:
         os.mkdir(path)
     except OSError:
@@ -254,11 +254,6 @@ if __name__ == '__main__':
     print(path, mean_logper, std_logper, vel_disp, bin_frac)
 
     # binary_model = False
-
-    if binary_model:
-        pref = path + 'bin'
-    else:
-        pref = path + 'nb'
 
     print('Make curves \n')
     S, truep = make_samp(Nstars,
@@ -274,16 +269,24 @@ if __name__ == '__main__':
                          vel_disp=vel_disp,
                          vel_err=vel_err,
                          seed=seed)
-    print('sampling \n')
-    with mp.Pool(mp.cpu_count()) as poo:
-        R = []
-        for i in range(Nstars):
-            cur_dat = S[i]
-            cur_truep = truep[i]
-            args = (cur_dat[0], cur_dat[1], cur_dat[2], binary_model, min_per,
-                    max_per, i)
-            R.append((i, poo.apply_async(posterior, args), cur_dat, cur_truep))
-        for cur_i, cur_r, cur_dat, cur_true in R:
-            cur_samp, cur_logz = cur_r.get()
-            idlsave.save(f'{pref}_{cur_i:05d}.psav', 'dat, samp, logz, truep',
-                         cur_dat, cur_samp, cur_logz, cur_true)
+    for binary_model in [False, True]:
+        if binary_model:
+            pref = path + 'ybin'
+        else:
+            pref = path + 'nb'
+
+        print('sampling \n')
+        with mp.Pool(mp.cpu_count()) as poo:
+            R = []
+            for i in range(Nstars):
+                cur_dat = S[i]
+                cur_truep = truep[i]
+                args = (cur_dat[0], cur_dat[1], cur_dat[2], binary_model,
+                        min_per, max_per, i)
+                R.append((i, poo.apply_async(posterior,
+                                             args), cur_dat, cur_truep))
+            for cur_i, cur_r, cur_dat, cur_true in R:
+                cur_samp, cur_logz = cur_r.get()
+                idlsave.save(f'{pref}_{cur_i:05d}.psav',
+                             'dat, samp, logz, truep', cur_dat, cur_samp,
+                             cur_logz, cur_true)
